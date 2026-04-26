@@ -1457,8 +1457,23 @@ export default function Page() {
         )}
 
         {/* planner tab */}
-        {topTab === "planner" && <SalesPlannerPanel />}
-      </div>
-    </div>
-  );
+       {topTab === "planner" && <SalesPlannerPanel /> }
+</div>
+
+<footer className="mx-auto max-w-7xl px-4 pb-8 text-center text-xs text-slate-500 md:px-8">
+  <div className="flex flex-col items-center justify-center gap-2 sm:flex-row sm:gap-3">
+    <span>© 2026 ペン太 / AI占い副業シミュレーター. All rights reserved.</span>
+    <a
+      href="https://x.com/ai_uranai_lab"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900"
+    >
+      最新情報はXで
+    </a>
+  </div>
+</footer>
+
+</div>
+);
 }
