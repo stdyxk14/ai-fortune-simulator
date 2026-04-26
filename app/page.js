@@ -29,7 +29,6 @@ function calcEconomics(m) {
   const platformFee = Math.round(platformRevenue * Math.max(0, m.platformFeeRate || 0));
   const supportCost = Math.round((m.fatigue || 0) * 120 + (m.platformOrders || 0) * 90 + (m.lineSubscribers || 0) * 40);
   const netRevenue = Math.max(0, grossRevenue - platformFee - supportCost);
-
   return {
     effectiveLeads,
     highTicketSales,
@@ -65,7 +64,9 @@ function calcScore(m, eco) {
 function calcGapToOneMillion(metrics, eco) {
   const target = 1000000;
   const gap = Math.max(0, target - (eco.netRevenue || 0));
-  return { target, gap };
+  const additionalSalesNeeded = Math.ceil(gap / Math.max(15000, metrics.ltv || 15000));
+  const extraLeadsNeeded = Math.ceil(additionalSalesNeeded / Math.max(0.01, metrics.closeRate || 0.01));
+  return { target, gap, additionalSalesNeeded, extraLeadsNeeded };
 }
 
 function Card({ className = "", children }) {
@@ -453,6 +454,67 @@ function scoreLabel(score) {
   return "まだ遠回り気味";
 }
 
+function buildWorkPrompt(history, metrics, economics) {
+  const lines = history.map((item, i) => `${i + 1}. ${item.stage}: ${item.label}`);
+  const currentNet = economics.netRevenue || 0;
+  const gapToTarget = Math.max(0, 1000000 - currentNet);
+  const closeRatePct = Math.round((metrics.closeRate || 0) * 1000) / 10;
+  const repeatRatePct = Math.round((metrics.repeatRate || 0) * 1000) / 10;
+
+  return `あなたは売上責任を持つ戦略コンサル兼オペレーション設計者です。
+以下のAI占い副業シミュレーション結果を前提に、
+「現状の想定数値をなぞる」のではなく、
+【月間粗利100万円を現実的に達成するための改善計画】を作ってください。
+
+【重要】
+- 現状の想定数値は“出発点”です。目標ではありません。
+- ゴールは月間粗利100万円到達です。
+- 足りない分を埋めるために、どの数値をどれだけ改善すべきか逆算してください。
+- 抽象論は禁止。週単位で実行できる粒度で出してください。
+- AI占い副業の文脈で、X / Threads / LINE / ココナラ / STORES などの実務に落としてください。
+
+【シミュレーション選択結果】
+${lines.join("\n")}
+
+【現状の想定数値】
+- 月間粗利予想: ${formatYen(currentNet)}
+- 月利100万までの不足額: ${formatYen(gapToTarget)}
+- 見込み客: ${metrics.leads}人
+- LINE登録: ${metrics.lineSubscribers}人
+- 低単価注文: ${metrics.platformOrders}件
+- 高単価成約数: ${economics.highTicketSales}件
+- 継続見込み: ${economics.repeatClients}人
+- LTV: ${formatYen(metrics.ltv)}
+- 高単価CVR: ${closeRatePct}%
+- リピート率: ${repeatRatePct}%
+- 低単価売上: ${formatYen(economics.platformRevenue)}
+- 高単価+継続売上: ${formatYen(economics.directRevenue + economics.repeatRevenue)}
+- 手数料: ${formatYen(economics.platformFee)}
+- 対応コスト: ${formatYen(economics.supportCost)}
+
+【あなたにやってほしいこと】
+1. まず、月間粗利100万円に届いていない原因を数式レベルで分解してください。
+   例: 見込み客不足 / CVR不足 / LTV不足 / 次提案不足 / 継続率不足 など。
+2. 100万円到達のために、最低限どのKPIをどこまで引き上げる必要があるか逆算してください。
+   例: 見込み客を何人に、CVRを何%に、LTVをいくらに、継続人数を何人に、など。
+3. 改善余地が大きい順に、優先順位つきで打ち手を出してください。
+4. 今週やるべき実務タスクを、優先順に10個出してください。
+5. X / Threadsで出すべき投稿案を5本、タイトルと要点つきで出してください。
+6. LINEまたは販売導線で使う文面のたたき台を作ってください。
+7. 次提案の流し方を、会話例つきで具体化してください。
+8. リストのクラスター分け（悩み別・温度感別）と、それぞれへの次アクションを作ってください。
+9. 最後に、
+   「最短で100万円に近づく現実的な1週間プラン」
+   を曜日単位で提示してください。
+
+【出力形式】
+- 見出しつき
+- 数字はできるだけ具体的に
+- 実行順が分かる構成
+- 日本語
+- 厳しめでOK、ただし現実的に`;
+}
+
 function PlannerPanel() {
   const [inputs, setInputs] = useState({
     frontOrders: 30,
@@ -512,9 +574,7 @@ export default function Page() {
   const [step, setStep] = useState(0);
   const [metrics, setMetrics] = useState(START_STATE);
   const [history, setHistory] = useState([]);
-  const [showDetails, setShowDetails] = useState(false);
-  const [showCompare, setShowCompare] = useState(false);
-  const [showPlanner, setShowPlanner] = useState(false);
+  const [activePanel, setActivePanel] = useState("details");
 
   const finished = step >= STAGES.length;
   const stage = STAGES[Math.min(step, STAGES.length - 1)];
@@ -526,6 +586,7 @@ export default function Page() {
     () => Object.entries(SCENARIOS).map(([key, sc]) => ({ key, ...sc, ...calcScenarioFromLabels(sc.picks) })),
     []
   );
+  const workPrompt = useMemo(() => buildWorkPrompt(history, metrics, economics), [history, metrics, economics]);
 
   const chooseOption = (option) => {
     const nextMetrics = applyImpact(metrics, option);
@@ -540,6 +601,7 @@ export default function Page() {
     setHistory(resultScenario.history);
     setStep(STAGES.length);
     setStarted(true);
+    setActivePanel("details");
   };
 
   const goBack = () => {
@@ -561,9 +623,7 @@ export default function Page() {
     setStep(0);
     setMetrics(START_STATE);
     setHistory([]);
-    setShowDetails(false);
-    setShowCompare(false);
-    setShowPlanner(false);
+    setActivePanel("details");
   };
 
   const progress = (step / STAGES.length) * 100;
@@ -586,6 +646,14 @@ export default function Page() {
                 <p className="mt-3 text-sm leading-7 text-slate-700">
                   売れる構造を選びながら体感する訓練ツールです。0→1だけでなく、月利100万までの距離を 週単位・比較・実数入力 で見られるようにしています。
                 </p>
+                <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-left">
+                  <div className="mb-1 text-sm font-semibold text-sky-900">シミュレーション後すぐ動けるようにしました</div>
+                  <div className="text-sm leading-6 text-sky-800">
+                    最後に、選んだ構造をもとに
+                    <span className="font-semibold"> 月利100万に近づくための実務指示プロンプト </span>
+                    をAI向けに自動生成できます。
+                  </div>
+                </div>
                 <div className="mt-5">
                   <Button className="w-full" onClick={() => setStarted(true)}>はじめる</Button>
                 </div>
@@ -594,7 +662,7 @@ export default function Page() {
 
             <SoftBox title="STEP 1" text="①〜⑪を1問ずつ選びます。迷ったら『おすすめ』で進めてOKです。" />
             <SoftBox title="STEP 2" text="選ぶたびに、下の固定バーで『月間粗利予想』『見込み客』『LTV』の感覚を掴みます。" />
-            <SoftBox title="STEP 3" text="最後に、結果・3ルート比較・売上管理パネルまで見られます。" />
+            <SoftBox title="STEP 3" text="最後に、結果・3ルート比較・売上管理・AI作業プロンプト生成まで見られます。" />
 
             <footer className="pb-6 pt-2 text-center text-xs text-slate-500">
               <div className="flex flex-col items-center justify-center gap-2">
@@ -658,19 +726,34 @@ export default function Page() {
               <MetricPill label="月利100万との差" value={formatYen(gap.gap)} />
               <MetricPill label="見込み客" value={`${metrics.leads}人`} />
               <MetricPill label="LTV" value={formatYen(metrics.ltv)} />
+              <MetricPill label="高単価成約数" value={`${economics.highTicketSales}件`} />
+              <MetricPill label="継続見込み" value={`${economics.repeatClients}人`} />
+              <MetricPill label="低単価売上" value={formatYen(economics.platformRevenue)} />
+              <MetricPill label="高単価+継続売上" value={formatYen(economics.directRevenue + economics.repeatRevenue)} />
+              <MetricPill label="手数料" value={formatYen(economics.platformFee)} />
+              <MetricPill label="対応コスト" value={formatYen(economics.supportCost)} />
+              <MetricPill label="CVR" value={`${Math.round((metrics.closeRate || 0) * 1000) / 10}%`} />
+              <MetricPill label="追加で必要な見込み客" value={`${gap.extraLeadsNeeded}人`} />
             </div>
 
-            <SoftBox title="今回の強み" text={result.strengths[0] || "大きな破綻はありません。入口から継続まで一度最後まで組めています。"} />
-            <SoftBox title="いちばんの改善ポイント" text={result.cautions[0] || "次は教育かリストの分け方をさらに丁寧にすると、積み上がりやすくなります。"} />
-
-            <div className="grid grid-cols-3 gap-2">
-              <Button className="w-full" onClick={() => setShowDetails((prev) => !prev)}>{showDetails ? "詳細を閉じる" : "詳細"}</Button>
-              <Button variant="outline" className="w-full" onClick={() => setShowCompare((prev) => !prev)}>{showCompare ? "比較を閉じる" : "3ルート比較"}</Button>
-              <Button variant="outline" className="w-full" onClick={() => setShowPlanner((prev) => !prev)}>{showPlanner ? "管理を閉じる" : "売上管理"}</Button>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                ["details", "詳細"],
+                ["compare", "比較"],
+                ["planner", "売上管理"],
+                ["prompt", "AI指示"],
+              ].map(([key, label]) => (
+                <Button key={key} variant={activePanel === key ? "default" : "outline"} className="w-full px-2" onClick={() => setActivePanel(key)}>
+                  {label}
+                </Button>
+              ))}
             </div>
 
-            {showDetails && (
+            {activePanel === "details" && (
               <div className="space-y-4">
+                <SoftBox title="今回の強み" text={result.strengths[0] || "大きな破綻はありません。入口から継続まで一度最後まで組めています。"} />
+                <SoftBox title="いちばんの改善ポイント" text={result.cautions[0] || "次は教育かリストの分け方をさらに丁寧にすると、積み上がりやすくなります。"} />
+
                 <Card>
                   <CardHeader><CardTitle>良かった点</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
@@ -704,7 +787,7 @@ export default function Page() {
               </div>
             )}
 
-            {showCompare && (
+            {activePanel === "compare" && (
               <Card>
                 <CardHeader>
                   <CardTitle>3ルート比較</CardTitle>
@@ -718,6 +801,8 @@ export default function Page() {
                         <MetricPill label="粗利" value={formatYen(item.economics.netRevenue)} emphasis />
                         <MetricPill label="LTV" value={formatYen(item.metrics.ltv)} />
                         <MetricPill label="見込み客" value={`${item.metrics.leads}人`} />
+                        <MetricPill label="CVR" value={`${Math.round((item.metrics.closeRate || 0) * 1000) / 10}%`} />
+                        <MetricPill label="高単価成約" value={`${item.economics.highTicketSales}件`} />
                         <MetricPill label="スコア" value={`${item.score}`} />
                       </div>
                       <div className="mt-3">
@@ -729,11 +814,30 @@ export default function Page() {
               </Card>
             )}
 
-            {showPlanner && <PlannerPanel />}
+            {activePanel === "planner" && <PlannerPanel />}
+
+            {activePanel === "prompt" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>AI作業指示プロンプト</CardTitle>
+                  <CardDescription>①〜⑪の選択結果をもとに、実務に落とすための指示文を自動生成しています。</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <textarea
+                    readOnly
+                    value={workPrompt}
+                    className="min-h-[360px] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700 outline-none"
+                  />
+                  <div className="text-xs leading-6 text-slate-500">
+                    これをそのままChatGPTや他のAIに投げて、今週の実務タスクや投稿案、LINE導線のたたき台作成に使えます。
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Button variant="outline" onClick={restart}>もう一回やる</Button>
-              <Button onClick={() => { setStarted(false); setStep(0); setMetrics(START_STATE); setHistory([]); setShowDetails(false); setShowCompare(false); setShowPlanner(false); }}>
+              <Button onClick={() => { setStarted(false); setStep(0); setMetrics(START_STATE); setHistory([]); setActivePanel("details"); }}>
                 トップへ戻る
               </Button>
             </div>
