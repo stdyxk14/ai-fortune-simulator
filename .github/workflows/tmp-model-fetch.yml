@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Download SDXS GGUF model
+      - name: Download and split SDXS GGUF model
         shell: bash
         run: |
           set -euo pipefail
@@ -24,12 +24,45 @@ jobs:
             "https://huggingface.co/koboldcpp/imgmodel/resolve/main/sdxs-512-tinySDdistilled_Q8_0.gguf?download=true" \
             -o sdxs-512-tinySDdistilled_Q8_0.gguf
           test -s sdxs-512-tinySDdistilled_Q8_0.gguf
-          sha256sum sdxs-512-tinySDdistilled_Q8_0.gguf
-      - name: Upload model artifact
+          sha256sum sdxs-512-tinySDdistilled_Q8_0.gguf | tee model.sha256
+          split -b 200M -d -a 2 sdxs-512-tinySDdistilled_Q8_0.gguf model.part-
+          ls -lh model.part-* model.sha256
+      - name: Upload model part 00
         uses: actions/upload-artifact@v4
         with:
-          name: sdxs-512-tinySDdistilled-Q8-0
-          path: sdxs-512-tinySDdistilled_Q8_0.gguf
+          name: sdxs-model-part-00
+          path: model.part-00
           compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload model part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdxs-model-part-01
+          path: model.part-01
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload model part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdxs-model-part-02
+          path: model.part-02
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload model part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdxs-model-part-03
+          path: model.part-03
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdxs-model-checksum
+          path: model.sha256
           retention-days: 1
           if-no-files-found: error
