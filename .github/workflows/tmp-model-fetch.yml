@@ -1,0 +1,35 @@
+name: Temporary SDXS model fetch
+
+on:
+  push:
+    branches:
+      - tmp-image-link
+    paths:
+      - .github/workflows/tmp-model-fetch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download SDXS GGUF model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 5 --retry-delay 5 \
+            "https://huggingface.co/koboldcpp/imgmodel/resolve/main/sdxs-512-tinySDdistilled_Q8_0.gguf?download=true" \
+            -o sdxs-512-tinySDdistilled_Q8_0.gguf
+          test -s sdxs-512-tinySDdistilled_Q8_0.gguf
+          sha256sum sdxs-512-tinySDdistilled_Q8_0.gguf
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdxs-512-tinySDdistilled-Q8-0
+          path: sdxs-512-tinySDdistilled_Q8_0.gguf
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
